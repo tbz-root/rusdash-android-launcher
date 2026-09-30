@@ -96,6 +96,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.net.ConnectException
 import java.net.UnknownHostException
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.net.URL
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -166,14 +172,34 @@ class MainActivity : ComponentActivity() {
                 launchViewModel.launchArguments = launchArguments
             }
 
-            launchViewModel.beginLaunchFlow()
+            // Наш изолированный стейт проверки обновлений
+            val context = LocalContext.current
+            var isModChecked by remember { mutableStateOf(false) }
+
+            // LaunchedEffect с ключом Unit гарантирует выполнение ровно 1 раз при старте
+            LaunchedEffect(Unit) {
+                ModUpdater.checkAndDownloadMod(filesDir, context)
+                isModChecked = true
+                launchViewModel.beginLaunchFlow()
+            }
 
             CompositionLocalProvider(LocalTheme provides theme) {
                 GeodeLauncherTheme(theme = theme, blackBackground = backgroundOption, dynamicColor = !dynamicColorOption) {
                     Surface(
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        AltMainScreen(launchViewModel)
+                        // Отрисовываем интерфейс лаунчера только когда проверка завершена
+                        if (isModChecked) {
+                            AltMainScreen(launchViewModel)
+                        } else {
+                            // Пока идет скачивание, показываем крутилку по центру экрана
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                LinearProgressIndicator()
+                            }
+                        }
                     }
                 }
             }
@@ -539,6 +565,9 @@ val sapphireColorPalette = BrandPalette(
 )
 
 @Preview(name = "non-animated, light")
+@Preview(name = "non-animated, light", showSystemUi = true, device = "id:pixel_5")
+@Preview(name = "non-animated, dark", uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES, showSystemUi = true, device = "id:pixel_5")
+
 @Preview(name = "non-animated, dark", uiMode = UI_MODE_NIGHT_YES)
 @Composable
 fun GeodeLogoPreview() {
@@ -552,8 +581,8 @@ fun GeodeLogoPreview() {
     }
 }
 
-@Preview(name = "animated, light")
-@Preview(name = "animated, dark", uiMode = UI_MODE_NIGHT_YES)
+@Preview(name = "non-animated, light", showSystemUi = true, device = "id:pixel_5")
+@Preview(name = "non-animated, dark", uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES, showSystemUi = true, device = "id:pixel_5")
 @Composable
 fun GeodeLogoAnimatedPreview() {
     val theme = if (isSystemInDarkTheme()) DARK else LIGHT
@@ -872,5 +901,55 @@ fun AltMainScreen(
     val loadFailure = launchViewModel.currentCrashInfo()
     if (showErrorInfo && loadFailure != null) {
         ErrorInfoSheet(loadFailure, onDismiss = { showErrorInfo = false })
+    }
+}
+
+object ModUpdater {
+    // ВСТАВЬТЕ СЮДА ВАШ URL РЕЛИЗОВ НА GITHUB API (с суффиксом /latest)
+    private const val MOD_API_URL = "https://api.github.com/repos/tbz-root/rusdash-android-launcher/releases/latest"
+
+    suspend fun checkAndDownloadMod(filesDir: File, context: Context) = withContext(Dispatchers.IO) {
+        try {
+            // 1. Запрашиваем JSON релиза
+            val response = URL(MOD_API_URL).readText()
+            val json = JSONObject(response)
+            val latestVersion = json.getString("tag_name")
+
+            // 2. Готовим локальную папку модов Geode
+            val modsDirectory = File(filesDir, "geode/mods")
+            if (!modsDirectory.exists()) {
+                modsDirectory.mkdirs()
+            }
+
+            // Замените на точное имя файла, под которым мод должен лежать на устройстве
+            val modFile = File(modsDirectory, "tabz.rusdash.geode")
+
+            // Сверяем версии по SharedPreferences
+            val sharedPrefs = context.getSharedPreferences("RusDashPrefs", Context.MODE_PRIVATE)
+            val currentLocalVersion = sharedPrefs.getString("installed_mod_version", "")
+
+            if (!modFile.exists() || currentLocalVersion != latestVersion) {
+                val assets = json.getJSONArray("assets")
+                for (i in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(i)
+                    if (asset.getString("name").endsWith(".geode")) {
+                        val downloadUrl = asset.getString("browser_download_url")
+
+                        // 3. Скачиваем байты напрямую в рабочую папку модов игры
+                        URL(downloadUrl).openStream().use { input ->
+                            modFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+
+                        // Запоминаем версию
+                        sharedPrefs.edit().putString("installed_mod_version", latestVersion).apply()
+                        break
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace() // Если отвалился интернет или репозиторий недоступен — просто пропускаем
+        }
     }
 }

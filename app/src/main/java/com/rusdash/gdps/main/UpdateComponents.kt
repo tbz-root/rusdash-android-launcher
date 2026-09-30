@@ -71,7 +71,6 @@ import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import kotlin.time.toJavaInstant
-
 fun clearDownloadedApks(context: Context) {
     // technically we should be using the activity results but it was too inconsistent for my liking
     val preferenceUtils = PreferenceUtils.get(context)
