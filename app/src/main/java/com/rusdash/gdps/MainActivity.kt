@@ -905,26 +905,20 @@ fun AltMainScreen(
 }
 
 object ModUpdater {
-    // ВСТАВЬТЕ СЮДА ВАШ URL РЕЛИЗОВ НА GITHUB API (с суффиксом /latest)
     private const val MOD_API_URL = "https://api.github.com/repos/tbz-root/rusdash-android-launcher/releases/latest"
 
     suspend fun checkAndDownloadMod(filesDir: File, context: Context) = withContext(Dispatchers.IO) {
         try {
-            // 1. Запрашиваем JSON релиза
             val response = URL(MOD_API_URL).readText()
             val json = JSONObject(response)
             val latestVersion = json.getString("tag_name")
-
-            // 2. Готовим локальную папку модов Geode
             val modsDirectory = File(filesDir, "geode/mods")
+            
             if (!modsDirectory.exists()) {
                 modsDirectory.mkdirs()
             }
 
-            // Замените на точное имя файла, под которым мод должен лежать на устройстве
             val modFile = File(modsDirectory, "tabz.rusdash.geode")
-
-            // Сверяем версии по SharedPreferences
             val sharedPrefs = context.getSharedPreferences("RusDashPrefs", Context.MODE_PRIVATE)
             val currentLocalVersion = sharedPrefs.getString("installed_mod_version", "")
 
@@ -935,21 +929,19 @@ object ModUpdater {
                     if (asset.getString("name").endsWith(".geode")) {
                         val downloadUrl = asset.getString("browser_download_url")
 
-                        // 3. Скачиваем байты напрямую в рабочую папку модов игры
                         URL(downloadUrl).openStream().use { input ->
                             modFile.outputStream().use { output ->
                                 input.copyTo(output)
                             }
                         }
 
-                        // Запоминаем версию
                         sharedPrefs.edit().putString("installed_mod_version", latestVersion).apply()
                         break
                     }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace() // Если отвалился интернет или репозиторий недоступен — просто пропускаем
+            e.printStackTrace()
         }
     }
 }
